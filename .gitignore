@@ -1,0 +1,7 @@
+.gradle/
+build/
+local.properties
+# Produced by scripts/fetch-proot.sh and scripts/build-rootfs.sh
+app/src/main/jniLibs/
+out/
+work/

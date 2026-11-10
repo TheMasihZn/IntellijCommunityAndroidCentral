@@ -1,0 +1,12 @@
+-Xms256m
+-Xmx2048m
+-XX:ReservedCodeCacheSize=256m
+-XX:+UseG1GC
+-XX:-UseContainerSupport
+-XX:SoftRefLRUPolicyMSPerMB=50
+-XX:CICompilerCount=2
+-Dsun.java2d.xrender=false
+-Dawt.useSystemAAFontSettings=lcd
+-Dide.no.platform.update=true
+-Djdk.attach.allowAttachSelf=true
+-Dfile.encoding=UTF-8

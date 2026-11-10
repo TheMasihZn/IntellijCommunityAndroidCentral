@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>IntelliJ</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1e1f22; overflow: hidden; }
+  #screen { width: 100%; height: 100%; }
+  #msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+         color: #bcbec4; font: 15px sans-serif; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="screen"></div>
+<div id="msg">Connecting to IntelliJ…</div>
+<script type="module">
+  // Minimal noVNC client: the Android app drives it through window.apk (keys, resize mode, focus).
+  import RFB from './core/rfb.js';
+
+  const msg = document.getElementById('msg');
+  let rfb = null;
+  let resize = true;
+
+  function connect() {
+    rfb = new RFB(document.getElementById('screen'), `ws://${location.host}/websockify`);
+    rfb.resizeSession = resize;   // the X display follows the window size
+    rfb.clipViewport = !resize;
+    rfb.scaleViewport = false;
+    rfb.focusOnClick = true;
+    rfb.showDotCursor = true;
+    rfb.addEventListener('connect', () => {
+      msg.style.display = 'none';
+      rfb.focus();
+      if (window.Android) Android.onConnected();
+    });
+    rfb.addEventListener('disconnect', () => {
+      msg.style.display = 'flex';
+      msg.textContent = 'Reconnecting…';
+      if (window.Android) Android.onDisconnected();
+      setTimeout(connect, 1500);
+    });
+  }
+
+  window.apk = {
+    key(keysym, down) { if (rfb) rfb.sendKey(keysym, null, down); },
+    press(keysym) { if (rfb) rfb.sendKey(keysym, null); },
+    // While the soft keyboard is up, keep the desktop size and scroll instead of shrinking the IDE.
+    setResize(on) {
+      resize = on;
+      if (!rfb) return;
+      rfb.clipViewport = !on;
+      rfb.resizeSession = on;
+    },
+    focus() { if (rfb) rfb.focus(); },
+  };
+
+  connect();
+</script>
+</body>
+</html>
