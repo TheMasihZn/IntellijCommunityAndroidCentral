@@ -49,7 +49,9 @@ class Installer(private val context: Context, private val linux: Linux) {
     deleteRecursively(staging)
     staging.mkdirs()
     extract(source, staging, stripComponents = 0, progress)
-    if (!File(staging, "bin").exists() || !File(staging, "usr/bin/Xvnc").exists()) {
+    // Check with lstat: inside the image /usr/bin/Xvnc is an absolute symlink
+    // (/usr/bin/Xvnc -> /etc/alternatives/Xvnc -> /usr/bin/Xtigervnc), which only resolves inside proot.
+    if (!File(staging, "usr/bin").isDirectory || !exists(File(staging, "usr/bin/Xvnc"))) {
       deleteRecursively(staging)
       throw IOException("${source.name} is not an APKintellij Linux image (no /usr/bin/Xvnc inside).")
     }
@@ -91,7 +93,7 @@ class Installer(private val context: Context, private val linux: Linux) {
   fun adoptLegacyInstall() {
     val legacy = File(linux.rootfs, ".apkintellij-rootfs")
     if (!legacy.isFile) return
-    if (linux.installedImage() == null && File(linux.rootfs, "bin").exists()) linux.markImage("bundled with app 0.1")
+    if (linux.installedImage() == null && File(linux.rootfs, "usr/bin").isDirectory) linux.markImage("bundled with app 0.1")
     if (linux.installedIde() == null && File(linux.ideDir, "bin/idea.sh").isFile) linux.markIde("bundled with app 0.1")
     legacy.delete()
   }
