@@ -24,7 +24,7 @@ class Linux(private val context: Context) {
 
   /** File name of the installed Linux image, or null. */
   fun installedImage(): String? =
-    imageMarker.takeIf { it.isFile && File(rootfs, "bin").exists() }?.readText()?.trim()
+    imageMarker.takeIf { it.isFile && File(rootfs, "usr/bin").isDirectory }?.readText()?.trim()
 
   /** File name of the installed IntelliJ archive, or null. */
   fun installedIde(): String? =
