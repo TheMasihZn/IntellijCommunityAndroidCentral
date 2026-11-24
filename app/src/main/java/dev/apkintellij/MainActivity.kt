@@ -77,6 +77,7 @@ class MainActivity : Activity(), KeyPanel.Actions {
   private lateinit var hingeGap: View
   private lateinit var keyPanel: KeyPanel
   private lateinit var imeView: ImeView
+  private lateinit var splitKeyboard: SplitKeyboard
   private lateinit var remote: Remote
   private lateinit var connecting: TextView
   private var ideShown = false
@@ -240,6 +241,13 @@ class MainActivity : Activity(), KeyPanel.Actions {
     }
   }
 
+  /** Our split keyboard floats over the IDE, so the desktop keeps its size and stays visible. */
+  override fun toggleSplitKeyboard() {
+    val show = splitKeyboard.visibility != View.VISIBLE
+    if (show && keyboardShown) toggleKeyboard()
+    splitKeyboard.visibility = if (show) View.VISIBLE else View.GONE
+  }
+
   override fun toggleFullscreen() {
     prefs.edit().putBoolean("fullscreen", !prefs.getBoolean("fullscreen", false)).apply()
     applyFullscreen()
@@ -269,6 +277,7 @@ class MainActivity : Activity(), KeyPanel.Actions {
     val items = arrayOf(
       "Linux and IntelliJ: install or update",
       if (keyBarVisible) "Hide the key bar" else "Show the key bar",
+      "Split keyboard settings",
       "Show log",
       "Restart Linux and IntelliJ",
       "Stop and close",
@@ -277,9 +286,10 @@ class MainActivity : Activity(), KeyPanel.Actions {
       when (which) {
         0 -> showSetup()
         1 -> { prefs.edit().putBoolean("keybar", !keyBarVisible).apply(); applyFoldLayout(null) }
-        2 -> showLog()
-        3 -> { stopLinux(); main.postDelayed({ startIde() }, 1500) }
-        4 -> { stopLinux(); finishAndRemoveTask() }
+        2 -> splitKeyboard.showSettings()
+        3 -> showLog()
+        4 -> { stopLinux(); main.postDelayed({ startIde() }, 1500) }
+        5 -> { stopLinux(); finishAndRemoveTask() }
       }
     }.show()
   }
@@ -374,6 +384,7 @@ class MainActivity : Activity(), KeyPanel.Actions {
       return
     }
     if (keyboardShown) { toggleKeyboard(); return }
+    if (splitKeyboard.visibility == View.VISIBLE) { toggleSplitKeyboard(); return }
     // In DeX the right mouse button can arrive as Back; never let a stray Back close the IDE.
     val now = System.currentTimeMillis()
     if (now - lastBack < 1500) moveTaskToBack(true) else lastBack = now
@@ -411,6 +422,7 @@ class MainActivity : Activity(), KeyPanel.Actions {
     hingeGap = View(this).apply { setBackgroundColor(Color.BLACK) }
     keyPanel = KeyPanel(this, remote, this)
     imeView = ImeView(this, remote)
+    splitKeyboard = SplitKeyboard(this, remote, prefs) { toggleSplitKeyboard() }.apply { visibility = View.GONE }
     connecting = TextView(this).apply {
       setTextColor(Color.parseColor("#BCBEC4"))
       gravity = Gravity.CENTER
@@ -420,6 +432,7 @@ class MainActivity : Activity(), KeyPanel.Actions {
       addView(webView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
       addView(connecting, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
       addView(imeView, FrameLayout.LayoutParams(1, 1))
+      addView(splitKeyboard, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
     }
     ideView = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL

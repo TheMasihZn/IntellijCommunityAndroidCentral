@@ -20,13 +20,14 @@ import android.widget.TextView
 /** Sends X11 keysyms to the IDE through the viewer page (viewer.html, `window.apk`). */
 class Remote(private val webView: WebView) {
   private val sticky = mutableSetOf<Int>()
-  var onStickyChanged: () -> Unit = {}
+  /** Called when a sticky modifier is armed or released (the key bar and the split keyboard). */
+  val stickyListeners = mutableListOf<() -> Unit>()
 
   fun isSticky(modifier: Int) = modifier in sticky
 
   fun toggleSticky(modifier: Int) {
     if (!sticky.remove(modifier)) sticky += modifier
-    onStickyChanged()
+    stickyListeners.forEach { it() }
   }
 
   fun key(keysym: Int, down: Boolean) = webView.evaluateJavascript("window.apk && apk.key($keysym, $down)", null)
@@ -40,7 +41,7 @@ class Remote(private val webView: WebView) {
     held.asReversed().forEach { key(it, false) }
     if (sticky.isNotEmpty()) {
       sticky.clear()
-      onStickyChanged()
+      stickyListeners.forEach { it() }
     }
   }
 
@@ -185,6 +186,7 @@ class ImeView(context: Context, private val remote: Remote) : View(context) {
 class KeyPanel(context: Context, private val remote: Remote, private val actions: Actions) : LinearLayout(context) {
   interface Actions {
     fun toggleKeyboard()
+    fun toggleSplitKeyboard()
     fun toggleFullscreen()
     fun openMenu()
   }
@@ -199,6 +201,7 @@ class KeyPanel(context: Context, private val remote: Remote, private val actions
 
     val bar = LinearLayout(context).apply { orientation = HORIZONTAL }
     bar.addView(key("⌨") { actions.toggleKeyboard() })
+    bar.addView(key("⌨⇹") { actions.toggleSplitKeyboard() })
     bar.addView(key("Esc") { remote.press(Keysym.ESCAPE) })
     bar.addView(key("Tab") { remote.press(Keysym.TAB) })
     bar.addView(modifier("Ctrl", Keysym.CTRL))
@@ -245,7 +248,7 @@ class KeyPanel(context: Context, private val remote: Remote, private val actions
     shortcut("Terminal") { remote.press(Keysym.f(12), Keysym.ALT) }
     addView(shortcuts, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
 
-    remote.onStickyChanged = { refreshModifiers() }
+    remote.stickyListeners += { refreshModifiers() }
   }
 
   fun setExpanded(expanded: Boolean) {
