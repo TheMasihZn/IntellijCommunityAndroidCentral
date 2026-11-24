@@ -1,5 +1,7 @@
 # APKintellij: IntelliJ IDEA on Android (Galaxy Z Fold, Samsung DeX)
 
+Where this is going (a Launcher hosting Lua co-launchers as separate users): [docs/LAUNCHER-PLAN.md](docs/LAUNCHER-PLAN.md).
+
 A small Android app that runs IntelliJ IDEA in a Debian Linux userspace (proot) and shows it as a
 normal resizable window. It is made of three parts that update independently:
 
@@ -33,8 +35,12 @@ and pick the new file. Your projects in `/root` and IntelliJ's settings are kept
   pop-up windows resize the Linux desktop to the new window size.
 * **Soft keyboard**: tap ⌨ on the key bar. Typing goes straight into IntelliJ (no autocorrect);
   while it is open the desktop keeps its size and scrolls instead of re-laying out.
+* **Split keyboard** (⌨⇹ on the key bar): our own keyboard split into two halves like Samsung
+  Keyboard's split layout, floating over the IDE with a see-through middle so the code stays
+  visible. ⚙ on it (or ⋯ › Split keyboard settings) sets key opacity, the middle's width and key
+  height.
 * **Key bar**: Esc, Tab, sticky Ctrl/Alt/Shift (tap Ctrl, then a key), arrows, Home/End,
-  PgUp/PgDn, Del, F1–F12, fullscreen (⛶) and the menu (⋯). Hide it from the menu when using a
+  PgUp/PgDn, Del, F1–F12, split keyboard (⌨⇹), fullscreen (⛶) and the menu (⋯). Hide it from the menu when using a
   hardware keyboard.
 * **Fullscreen** (⛶) hides Android's status and navigation bars; swipe from an edge to peek.
 * Touch: tap to click, drag to select, long-press for right click, two-finger drag to scroll.
