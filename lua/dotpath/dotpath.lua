@@ -10,7 +10,7 @@ local M = {}
 ---------------------------------------------------------------- parser
 
 -- One statement:  [verb] path [-> name] [until path] [when cond]
---   cond = path | $name = value | $name != value
+--   cond = path | $name = value | $name != value | $name means value
 -- Returns { verb=, segments={ {name=, args=, optional=, timeout=} | {brk=true} ... }, bind=, when= }
 function M.parse(src)
   local s = src:match("^%s*(.-)%s*$")
@@ -34,7 +34,12 @@ function M.parse(src)
       cmd.when, i = M._path(s, j)
     elseif s:match("^when%s+%$", i) then
       local var, op, j = s:match("^when%s+%$([%a_][%w_]*)%s*([!=]=?)%s*()", i)
-      if not var or (op ~= "=" and op ~= "!=" and op ~= "==") then error("bad condition at column " .. i, 0) end
+      if not var then
+        var, op, j = s:match("^when%s+%$([%a_][%w_]*)%s+(means)%s+()", i)
+      end
+      if not var or not (op == "=" or op == "!=" or op == "==" or op == "means") then
+        error("bad condition at column " .. i, 0)
+      end
       local val
       if s:sub(j, j) == '"' then
         local q = s:match('^"(.-)"()', j)
@@ -45,7 +50,7 @@ function M.parse(src)
         val = val:gsub("%.$", "")                 -- the final '.' ends the program, not the value
         val = tonumber(val) or val
       end
-      cmd.when = { var = var, neg = op == "!=", value = val }
+      cmd.when = { var = var, neg = op == "!=", means = op == "means", value = val }
     else
       error(("unexpected %q at column %d"):format(s:sub(i), i), 0)
     end
@@ -355,6 +360,28 @@ function M._pipeline(root, segs, ctx, depth)
   return true, report
 end
 
+-- "means": does a free-form answer mean yes / no? The Android runtime asks the LLM (the only LLM
+-- call at run time, and only for this). This token-free fallback knows common words.
+local MEANS = {
+  yes = { "yes", "yeah", "yep", "sure", "ok", "okay", "i'm in", "im in", "let's go", "lets go", "down",
+          "بله", "آره", "اره", "باشه", "حتما", "حتماً", "پایه‌ام", "پایه ام", "پایم", "اوکی" },
+  no  = { "no", "nope", "nah", "can't", "cant", "not now", "later", "busy",
+          "نه", "نمی‌تونم", "نمیتونم", "الان نه", "بعدا", "بعداً", "سرم شلوغه" },
+}
+function M.means(value, target)
+  local text = " " .. tostring(value or ""):lower() .. " "
+  local function has(list)
+    for _, w in ipairs(list) do
+      local pat = w:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")
+      if text:find("[^%w]" .. pat .. "[^%w]") then return true end
+    end
+  end
+  target = tostring(target):lower()
+  if target == "yes" then return has(MEANS.yes) and not has(MEANS.no) end
+  if target == "no" then return has(MEANS.no) and not has(MEANS.yes) end
+  return text:find(target, 1, true) ~= nil
+end
+
 local function explain(root, cmd, ctx)
   local okx, steps = pcall(M.steps, root, cmd.segments)
   if not okx then return false, steps end
@@ -408,8 +435,12 @@ function M.run(root, src, opts)
       local go = true
       if cmd.when and cmd.when.var then
         local v = ctx.vars[cmd.when.var]
-        local same = v == cmd.when.value or tostring(v):lower() == tostring(cmd.when.value):lower()
-        go = same ~= cmd.when.neg
+        if cmd.when.means then
+          go = (opts.means or M.means)(v, cmd.when.value) == true
+        else
+          local same = v == cmd.when.value or tostring(v):lower() == tostring(cmd.when.value):lower()
+          go = same ~= cmd.when.neg
+        end
       elseif cmd.when then
         local quiet = ctx.log; ctx.log = function() end
         go = M._pipeline(root, cmd.when, ctx, 0)

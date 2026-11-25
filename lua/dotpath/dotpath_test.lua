@@ -174,8 +174,8 @@ local FIRST = [[
 start .vpn until .telegram.connected;
 start .telegram.write(Pepe, "wanna play CS:GO");
 start .telegram.wait-reply(Pepe)@30m -> respond;
-start .steam.counter-strike when $respond = yes;
-start .obs.stream when $respond = yes.
+start .steam.counter-strike when $respond means yes;
+start .obs.stream when $respond means yes.
 ]]
 
 local function first_tree(answer)
@@ -194,18 +194,24 @@ local function first_tree(answer)
 end
 
 test("first.script: try VPNs until Telegram connects, then play if yes", function()
-  local ok, r = dp.run(first_tree("Yes"), FIRST, quiet)
+  local ok, r = dp.run(first_tree("Yes, I'm in!"), FIRST, quiet)
   assert(ok, r.error)
   eq(table.concat(calls, " "), "free-a free-b write(Pepe,wanna play CS:GO) wait-reply(Pepe) cs stream")
 end)
 
 test("first.script: answer no skips the game", function()
-  local ok, r = dp.run(first_tree("no"), FIRST, quiet)
+  local ok, r = dp.run(first_tree("not now, I'm busy"), FIRST, quiet)
   assert(ok, r.error); eq(#r.skipped, 2); eq(calls[#calls], "wait-reply(Pepe)")
 end)
 
 test("when with != and quoted value", function()
   local c = dp.parse('start .a when $x != "a b"'); eq(c.when.value, "a b"); assert(c.when.neg)
+end)
+
+test("means: free-form answers", function()
+  assert(dp.means("yeah sure", "yes")); assert(dp.means("آره پایه‌ام", "yes"))
+  assert(not dp.means("no", "yes")); assert(dp.means("الان نه", "no"))
+  assert(not dp.means("yes but not now", "yes"))  -- mixed: fallback says unsure; the LLM decides
 end)
 
 print(("%d passed, %d failed"):format(pass, fail))
