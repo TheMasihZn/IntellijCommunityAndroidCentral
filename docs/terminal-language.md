@@ -320,6 +320,11 @@ Pepe; `.telegram.connected` is how to test the connection. It is updated by the 
 and apps can register **triggers** (like Android intents: an app declares what it reacts to, and is woken
 when that happens). The context file is what lets a seed say `.vpn` without saying what a VPN is.
 
+The context file includes the person's **personal dictionary** ([personal-dictionary.md](personal-dictionary.md)):
+the words they coin or mix, like «تنظیمable» (Persian root, English suffix: configurable) or *natije-giri*. The AI
+that acts for the person reads it before interpreting anything and uses the same words when it speaks for
+them, so it talks like them instead of like itself. New coinages are added as they appear.
+
 ## 9. Folders as lazy filters
 
 A folder like `.vpn` on the home screen is a hand-made filter over a potentially infinite amount of
