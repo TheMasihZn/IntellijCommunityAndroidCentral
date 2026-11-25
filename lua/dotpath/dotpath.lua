@@ -103,13 +103,16 @@ function M._path(s, i)
   return segs, i
 end
 
--- Split a program into statements on ';' and newlines (outside quotes and parentheses).
--- '#' starts a comment. Returns a list of statement strings.
+-- Split a program into statements (outside quotes and parentheses). Separators:
+--   ;  or a new line   start this and go on to the next statement without waiting
+--   =>                 wait for this; its result feeds into the next statement as $it
+-- '#' starts a comment. Returns { {text=, sep=";"|"=>"} ... }.
 function M.split(text)
   local out, buf, depth, quoted, i = {}, {}, 0, false, 1
-  local function flush()
+  local function flush(sep)
     local st = table.concat(buf):match("^%s*(.-)%s*$")
-    if st ~= "" then out[#out + 1] = st end
+    if st ~= "" then out[#out + 1] = { text = st, sep = sep }
+    elseif sep == "=>" and #out > 0 then out[#out].sep = "=>" end
     buf = {}
   end
   while i <= #text do
@@ -123,12 +126,13 @@ function M.split(text)
     elseif c == ")" then depth = depth - 1; buf[#buf + 1] = c
     elseif c == "#" and depth == 0 then
       while i <= #text and text:sub(i, i) ~= "\n" do i = i + 1 end
-      flush()
-    elseif (c == ";" or c == "\n") and depth == 0 then flush()
+      flush(";")
+    elseif c == "=" and text:sub(i + 1, i + 1) == ">" and depth == 0 then flush("=>"); i = i + 1
+    elseif (c == ";" or c == "\n") and depth == 0 then flush(";")
     else buf[#buf + 1] = c end
     i = i + 1
   end
-  flush()
+  flush(";")
   return out
 end
 
@@ -394,17 +398,26 @@ local function explain(root, cmd, ctx)
   return true, steps
 end
 
--- Run a program: one or more statements separated by ';' or new lines.
---   start   run now, automatically
---   ask     run now, then the person approves the result before anything else happens
---   later   run after every start/ask statement (the Android runtime picks the moment)
+-- Run a program. Statements run as soon as what they depend on is finished, so independent
+-- statements run in parallel. A statement depends on:
+--   the statement before it, when that one ended with '=>' (its result is $it here)
+--   the statement that stored a $name it uses (in arguments or in 'when $name ...')
+--   every start/ask statement, if it is a 'later' statement
+-- Verbs:
+--   start   run automatically
+--   ask     run, then the person approves the result before its dependents continue
+--   later   automatic work after everything else (the Android runtime picks the moment)
 --   explain show what would run, run nothing
--- opts: log(line), clock() -> seconds, approve(statement, value) -> bool, notify(ok, report), env
+-- Parallelism here is cooperative: each statement is a coroutine, and an action that waits
+-- (for a reply, a connection) calls ctx.wait() to let the others run. The Android runtime
+-- uses real threads/processes with the same dependency rules.
+-- opts: log(line), clock() -> seconds, approve(statement, value) -> bool, notify(ok, report),
+--       means(value, target) -> bool, env
 function M.run(root, src, opts)
   opts = opts or {}
-  local ctx = { log = opts.log or print, clock = opts.clock or os.time, done = {},
-                env = opts.env or {}, vars = {} }
-  local report = { steps = {}, skipped = {} }
+  local shared = { log = opts.log or print, clock = opts.clock or os.time, done = {},
+                   env = opts.env or {}, vars = {}, wait = coroutine.yield }
+  local report = { steps = {}, skipped = {}, order = {} }
   local function finish(ok, err)
     report.error = err
     if opts.notify then opts.notify(ok, report) end
@@ -412,57 +425,115 @@ function M.run(root, src, opts)
   end
 
   local cmds = {}
-  for _, text in ipairs(M.split(src)) do
-    local okp, cmd = pcall(M.parse, text)
+  for _, st in ipairs(M.split(src)) do
+    local okp, cmd = pcall(M.parse, st.text)
     if not okp then return finish(false, cmd) end
     if not ({ start = 1, ask = 1, later = 1, explain = 1 })[cmd.verb] then
       return finish(false, "unknown verb " .. cmd.verb)
     end
-    cmd.text = text
+    cmd.text, cmd.sep = st.text, st.sep
     cmds[#cmds + 1] = cmd
   end
 
-  local queue = {}
-  for _, c in ipairs(cmds) do if c.verb ~= "later" then queue[#queue + 1] = c end end
-  for _, c in ipairs(cmds) do if c.verb == "later" then queue[#queue + 1] = c end end
-
-  for _, cmd in ipairs(queue) do
-    if cmd.verb == "explain" then
-      local ok, err = explain(root, cmd, ctx)
-      if not ok then return finish(false, err) end
-      for _, st in ipairs(err) do report.steps[#report.steps + 1] = st end
-    else
-      local go = true
-      if cmd.when and cmd.when.var then
-        local v = ctx.vars[cmd.when.var]
-        if cmd.when.means then
-          go = (opts.means or M.means)(v, cmd.when.value) == true
-        else
-          local same = v == cmd.when.value or tostring(v):lower() == tostring(cmd.when.value):lower()
-          go = same ~= cmd.when.neg
+  -- dependencies
+  local function uses(cmd)
+    local names = {}
+    local function scan(segs)
+      for _, seg in ipairs(segs or {}) do
+        for _, a in ipairs(seg.args or {}) do
+          if type(a) == "string" and a:sub(1, 1) == "$" then names[#names + 1] = a:sub(2) end
         end
-      elseif cmd.when then
-        local quiet = ctx.log; ctx.log = function() end
-        go = M._pipeline(root, cmd.when, ctx, 0)
-        ctx.log = quiet
-      end
-      if not go then
-        report.skipped[#report.skipped + 1] = cmd.text
-        ctx.log("– skipped (condition not met): " .. cmd.text)
-      end
-      if go then
-        ctx["until"] = cmd["until"]
-        local ok, sub = M._pipeline(root, cmd.segments, ctx, 0)
-        ctx["until"] = nil
-        for _, st in ipairs(sub.steps) do report.steps[#report.steps + 1] = st end
-        if not ok then return finish(false, sub.error) end
-        if cmd.verb == "ask" then
-          local approve = opts.approve or function() return false end
-          if not approve(cmd.text, ctx.it) then return finish(false, "not approved: " .. cmd.text) end
-        end
-        if cmd.bind then ctx.vars[cmd.bind] = ctx.it end
       end
     end
+    scan(cmd.segments); scan(cmd["until"])
+    if cmd.when then if cmd.when.var then names[#names + 1] = cmd.when.var else scan(cmd.when) end end
+    return names
+  end
+  for i, cmd in ipairs(cmds) do
+    local deps = {}
+    if i > 1 and cmds[i - 1].sep == "=>" then deps[i - 1] = true; cmd.feed = i - 1 end
+    for _, name in ipairs(uses(cmd)) do
+      if name == "it" then
+        if i > 1 then deps[i - 1] = true; cmd.feed = i - 1 end
+      else
+        for j = i - 1, 1, -1 do if cmds[j].bind == name then deps[j] = true; break end end
+      end
+    end
+    if cmd.verb == "later" then
+      for j, c in ipairs(cmds) do if c.verb ~= "later" and j ~= i then deps[j] = true end end
+    end
+    cmd.deps = deps
+  end
+
+  local function statement(cmd, ctx)
+    if cmd.verb == "explain" then
+      local ok, steps = explain(root, cmd, ctx)
+      if not ok then return false, steps end
+      for _, st in ipairs(steps) do report.steps[#report.steps + 1] = st end
+      return true
+    end
+    local go = true
+    if cmd.when and cmd.when.var then
+      local v = ctx.vars[cmd.when.var]
+      if cmd.when.means then
+        go = (opts.means or M.means)(v, cmd.when.value) == true
+      else
+        local same = v == cmd.when.value or tostring(v):lower() == tostring(cmd.when.value):lower()
+        go = same ~= cmd.when.neg
+      end
+    elseif cmd.when then
+      local log = ctx.log; ctx.log = function() end
+      go = M._pipeline(root, cmd.when, ctx, 0)
+      ctx.log = log
+    end
+    if not go then
+      report.skipped[#report.skipped + 1] = cmd.text
+      ctx.log("– skipped (condition not met): " .. cmd.text)
+      return true, "skipped"
+    end
+    ctx["until"] = cmd["until"]
+    local ok, sub = M._pipeline(root, cmd.segments, ctx, 0)
+    ctx["until"] = nil
+    for _, st in ipairs(sub.steps) do report.steps[#report.steps + 1] = st end
+    if not ok then return false, sub.error end
+    if cmd.verb == "ask" then
+      local approve = opts.approve or function() return false end
+      if not approve(cmd.text, ctx.it) then return false, "not approved: " .. cmd.text end
+    end
+    if cmd.bind then ctx.vars[cmd.bind] = ctx.it end
+    return true
+  end
+
+  -- cooperative scheduler
+  local state, co, ctxs = {}, {}, {}
+  local remaining = #cmds
+  while remaining > 0 do
+    local progressed = false
+    for i, cmd in ipairs(cmds) do
+      if not state[i] then
+        local ready = true
+        for j in pairs(cmd.deps) do if state[j] ~= "done" then ready = false end end
+        if ready then
+          local ctx = setmetatable({}, { __index = shared })
+          if cmd.feed then ctx.it = ctxs[cmd.feed].it end
+          ctxs[i] = ctx
+          co[i] = coroutine.create(function() return statement(cmd, ctx) end)
+          state[i] = "running"
+          report.order[#report.order + 1] = "start " .. i
+        end
+      end
+      if state[i] == "running" then
+        progressed = true
+        local okc, ok, err = coroutine.resume(co[i])
+        if not okc then return finish(false, cmd.text .. ": " .. tostring(ok)) end
+        if coroutine.status(co[i]) == "dead" then
+          if not ok then return finish(false, err) end
+          state[i] = "done"; remaining = remaining - 1
+          report.order[#report.order + 1] = "end " .. i
+        end
+      end
+    end
+    if not progressed then return finish(false, "nothing can run (circular wait)") end
   end
   return finish(true)
 end

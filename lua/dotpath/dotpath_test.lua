@@ -133,7 +133,7 @@ local PARSA = [[
 # "send Parsa the photo of Luna from last night, he'd like it"
 ask   .photos.find("Luna", last-night) -> photo;
 ask   .telegram.draft(Parsa, $photo, "فکر کنم اینو دوست داری") -> draft;
-later .vpn when .net.filtered;
+later .vpn when .net.filtered =>
 later .telegram.send($draft).
 ]]
 
@@ -161,7 +161,9 @@ end)
 
 test("split keeps ; inside strings and parens", function()
   local st = dp.split('start .a("x;y");\nstart .b # c;d\n\nstart .c.')
-  eq(#st, 3); eq(st[1], 'start .a("x;y")'); eq(st[2], "start .b"); eq(st[3], "start .c.")
+  eq(#st, 3); eq(st[1].text, 'start .a("x;y")'); eq(st[2].text, "start .b"); eq(st[3].text, "start .c.")
+  local t = dp.split("start .a =>\nstart .b; start .c.")
+  eq(t[1].sep, "=>"); eq(t[2].sep, ";"); eq(#t, 3)
 end)
 
 test("unknown variable is an error", function()
@@ -171,8 +173,8 @@ end)
 
 -- The first script file (first.script), compiled for one phone. See docs/terminal-language.md §7.
 local FIRST = [[
-start .vpn until .telegram.connected;
-start .telegram.write(Pepe, "wanna play CS:GO");
+start .vpn until .telegram.connected =>
+start .telegram.write(Pepe, "wanna play CS:GO") =>
 start .telegram.wait-reply(Pepe)@30m -> respond;
 start .steam.counter-strike when $respond means yes;
 start .obs.stream when $respond means yes.
@@ -212,6 +214,49 @@ test("means: free-form answers", function()
   assert(dp.means("yeah sure", "yes")); assert(dp.means("آره پایه‌ام", "yes"))
   assert(not dp.means("no", "yes")); assert(dp.means("الان نه", "no"))
   assert(not dp.means("yes but not now", "yes"))  -- mixed: fallback says unsure; the LLM decides
+end)
+
+-- ';' starts and goes on; '=>' waits (natije-giri). Actions that take time call ctx.wait().
+local function timeline_tree(log)
+  local function slow(name, ticks) return { run = function(ctx)
+    log[#log + 1] = name .. "+"
+    for _ = 1, ticks do ctx.wait() end
+    log[#log + 1] = name .. "-"
+    return true, name
+  end } end
+  return dp.tree{ steam = slow("cs", 2), obs = slow("obs", 2), slow = slow("slow", 3), fast = slow("fast", 0) }
+end
+
+test("';' runs in parallel", function()
+  local log = {}
+  local ok, r = dp.run(timeline_tree(log), "start .steam; start .obs.", quiet)
+  assert(ok, r.error); eq(table.concat(log, " "), "cs+ obs+ cs- obs-")
+end)
+
+test("';' does not wait for a slow step", function()
+  local log = {}
+  dp.run(timeline_tree(log), "start .slow; start .fast.", quiet)
+  eq(table.concat(log, " "), "slow+ fast+ fast- slow-")
+end)
+
+test("'=>' waits and feeds the result", function()
+  local log, got = {}, nil
+  local root = timeline_tree(log)
+  root.children.show = { kind = "action", run = function(ctx) got = ctx.it; return true end }
+  local ok, r = dp.run(root, "start .slow =>\nstart .show.", quiet)
+  assert(ok, r.error); eq(got, "slow"); eq(table.concat(log, " "), "slow+ slow-")
+end)
+
+test("first.script: both actions in the if-block start together", function()
+  local log = {}
+  local root = timeline_tree(log)
+  root.children.ask = { kind = "action", run = function() return true, "yes I'm in" end }
+  local ok, r = dp.run(root, [[
+start .ask -> respond;
+start .steam when $respond means yes;
+start .obs when $respond means yes.
+]], quiet)
+  assert(ok, r.error); eq(table.concat(log, " "), "cs+ obs+ cs- obs-")
 end)
 
 print(("%d passed, %d failed"):format(pass, fail))

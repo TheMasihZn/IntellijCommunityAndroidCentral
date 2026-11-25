@@ -1,6 +1,6 @@
 # DotPath: the DevOs command language, and Intentions
 
-Status: draft 3 (2026-11-25). Reference interpreter: [`lua/dotpath/dotpath.lua`](../lua/dotpath/dotpath.lua),
+Status: draft 4 (2026-11-25). Reference interpreter: [`lua/dotpath/dotpath.lua`](../lua/dotpath/dotpath.lua),
 tests: `lua5.4 lua/dotpath/dotpath_test.lua`. Part of the Launcher plan (`docs/LAUNCHER-PLAN.md`, PR #2).
 
 ## خلاصه به فارسی
@@ -22,11 +22,14 @@ tests: `lua5.4 lua/dotpath/dotpath_test.lua`. Part of the Launcher plan (`docs/L
 ```
 ask   .photos.find("Luna", last-night) -> photo;
 ask   .telegram.draft(Parsa, $photo, "فکر کنم اینو دوست داری") -> draft;
-later .vpn when .net.filtered;
+later .vpn when .net.filtered =>
 later .telegram.send($draft).
 ```
 
-- `;` آخر خط یعنی «این مرحله تمام شد ولی کار من هنوز تمام نشده». `.` آخر یعنی «کار تمام شد».
+- **همه‌چیز به‌طور پیش‌فرض موازی است.** `;` یعنی «این را شروع کن و برو سراغ بعدی»، منتظر نمی‌ماند.
+- `=>` یعنی **نتیجه‌گیری**: اگر چیزی نتیجه‌ی چیز دیگری است، باید منتظرش ماند و خروجی‌اش ورودی بعدی می‌شود.
+  (مثل «نتیجه می‌دهد» در ریاضی.) جز این، هیچ‌چیز منتظر هیچ‌چیز نمی‌ماند؛ بلوک‌های عمل هم با هم اجرا می‌شوند.
+- `.` آخر یعنی «کار تمام شد».
 - `.vpn` یعنی برو داخل فولدر، فیلترشکن‌ها را به ترتیب امتحان کن، **اولین موفق** را نگه دار.
 - `ask` یعنی همین الان انجامش بده و نشانم بده تا تأیید کنم (مثل نوشتن پیش‌نویس و نزدن ارسال).
 - `later` یعنی کار خودکاری که بعداً، هر وقت وقتش شد، انجام می‌شود (وصل کردن VPN، ارسال).
@@ -71,7 +74,7 @@ A leading `NN-` / `NN_` is not part of the name. What the person sees in the fil
 ## 3. Syntax
 
 ```
-program   = statement { (";" | newline) statement } ["."]
+program   = statement { (";" | newline | "=>") statement } ["."]
 statement = [verb] path ["->" var] ["until" path] ["when" cond]
 cond      = path | "$" var ("=" | "!=" | "means") (bareword | '"' string '"')
 verb      = "start" | "ask" | "later" | "explain"      ; start is the default
@@ -82,8 +85,8 @@ arg       = '"' string '"' | number | "$" var | bareword    ; \" and \\ escape i
 comment   = "#" to end of line
 ```
 
-Reading rule for people: **one line is one function**. `;` ends a line whose task is not finished yet
-("VPN found, but I still have to send the message"); the final `.` ends the whole task.
+Reading rule for people: **one line is one function**. `;` means "start this and go on" (no waiting);
+`=>` means "and then, with this result" (wait); the final `.` ends the whole task.
 
 ## 4. Meaning
 
@@ -109,11 +112,29 @@ Segments are grouped into **steps** by walking the tree greedily:
 Each step's value is passed on as `$it`. A failing step stops the program and reports `step: reason`, unless
 the segment is marked `?` (optional).
 
-### 4.3 Statements and verbs
+### 4.3 Parallel by default; wait only on natije-giri (`=>`)
+
+Everything runs **in parallel by default**. The only reason to wait is *natije-giri* (نتیجه‌گیری,
+implication, as in mathematics' ⇒): when one action's result is what the next action needs. A statement
+waits for exactly these, and nothing else:
+
+* the statement before it, when that one ends with `=>` (its result arrives as `$it`);
+* the statement that stored a `$name` it uses (in its arguments or in `when $name …`): using a result is
+  itself natije-giri, so it never needs to be written twice;
+* for a `later` statement, every `start`/`ask` statement.
+
+`;` and a new line mean "start this and go on to the next". The program ends when everything it started has
+finished; then the person is notified. **Action blocks** (what a programmer would call code blocks, like the
+`{ … }` after an `if`) follow the same rule: the actions inside a block run together, and whole blocks run
+in parallel with each other, unless a dependency is proven, judged by the AI when it compiles the seed (for
+example: Telegram needs the VPN first even if the person did not write `=>`), or the person asks for an order.
+The compiled program always writes such a judged dependency out as `=>`, so it can be read and corrected.
+
+### 4.4 Statements and verbs
 | Verb | When it runs | Person involved |
 |---|---|---|
-| `start` | now, in order | no |
-| `ask` | now, in order; its result is shown and the person approves before anything continues | **yes** |
+| `start` | as soon as what it depends on is done | no |
+| `ask` | the same; its result is shown and the person approves before anything that depends on it continues | **yes** |
 | `later` | after every `start`/`ask`; the runtime picks the moment (network, battery, idle, or when its output is needed) | no |
 | `explain` | prints the steps; runs nothing | reads it |
 
@@ -127,7 +148,7 @@ and only if it passes does the group stop (`start .vpn until .telegram.connected
 order, until Telegram reports connected).
 `-> name` stores the statement's result; `$name` uses it later. At the end the runtime notifies the person.
 
-### 4.4 The procedure: attention first, automation later
+### 4.5 The procedure: attention first, automation later
 This is the procedure masih uses by hand and the one the LLM must produce:
 
 1. Everything that needs the person's **attention** (choosing the photo, writing and editing the message)
@@ -138,14 +159,14 @@ This is the procedure masih uses by hand and the one the LLM must produce:
 
 So the person spends attention once, leaves, and the rest happens without them.
 
-### 4.5 Never twice, and only when needed
+### 4.6 Never twice, and only when needed
 * Within a run, an action reached again (for example through an alias) returns its first value.
 * `check` says "already done" across runs.
 * `later` work is computed only when its time comes or its output is needed: no computation for things that
   do not matter right now.
 * A compiled Intention needs no tokens to run again.
 
-### 4.6 Timeouts and errors
+### 4.7 Timeouts and errors
 Default 30 s per action, overridable by the action (`timeout`) or the segment (`@20s`, `@2m`, applied to each
 alternative). Reported errors: unknown name, syntax error with column, namespace named alone, every
 alternative failed (with reasons), timeout, unknown `$name`, alias loop, not approved.
@@ -178,7 +199,7 @@ Said: *"send Parsa the photo I took of Luna last night, he'd like it"*
 # send Parsa the photo of Luna from last night
 ask   .photos.find("Luna", last-night) -> photo;
 ask   .telegram.draft(Parsa, $photo, "فکر کنم اینو دوست داری") -> draft;
-later .vpn when .net.filtered;
+later .vpn when .net.filtered =>
 later .telegram.send($draft).
 ```
 
@@ -225,9 +246,9 @@ The seed is written the way masih thinks, with programming habits where they hel
 | `.vpn` after a place (`HomeScreen.vpn`) | look it up there | "in the home screen, the VPN folder" |
 | `.forEach` | each alternative, in order | "for each one" |
 | `.while(X != Y)` | keep going **until** the goal holds (masih writes *while* and means *until*) | "until Telegram is connected" |
-| `=>` | and then; the result feeds into the next action | "and then" |
-| `if(x=yes) { … }` | condition on an earlier result, judged by meaning; if it fails the whole `{ }` block is skipped | "if the answer means yes" |
-| `;` | this step is done, the task continues | (pause) |
+| `=>` | natije-giri: wait, and the result feeds into the next action | "and then" |
+| `if(x=yes) { … }` | action block with a condition on an earlier result, judged by meaning; if it fails the whole block is skipped; the actions inside start together | "if the answer means yes" |
+| `;` | start this and go on, do not wait | "and also" |
 | `.` at the end, nothing after | the script ends ("bye-bye") | "done" |
 
 The seed does not have to be exact. Where the person was brief, lazy, or wrote a typo (`OBS.stream():`), the
@@ -254,8 +275,8 @@ OBS.stream():
 Compiled for this phone (`first.dp`; this exact program is a test in `dotpath_test.lua`):
 
 ```
-start .vpn until .telegram.connected;
-start .telegram.write(Pepe, "wanna play CS:GO");
+start .vpn until .telegram.connected =>
+start .telegram.write(Pepe, "wanna play CS:GO") =>
 start .telegram.wait-reply(Pepe)@30m -> respond;
 start .steam.counter-strike when $respond means yes;
 start .obs.stream when $respond means yes.
@@ -267,7 +288,7 @@ How the AI reads it back, in English:
 > of VPN apps you put there on purpose and have used this way before. For each app in it, in order, start it,
 > until Telegram is connected; the moment Telegram connects, stop trying. And then, feeding into Telegram,
 > find Pepe and write: "wanna play CS:GO". That step is done, but the task is not. Wait for Pepe's reply. If
-> it means yes, in any words ("yes, I'm in"), start Counter-Strike in Steam, then start streaming in OBS. If
+> it means yes, in any words ("yes, I'm in"), start Counter-Strike in Steam and, at the same time, streaming in OBS. If
 > it means no (he is busy), everything inside the curly braces is skipped. The script ends with a dot and
 > nothing after it, so we are done. Bye-bye.
 
@@ -277,7 +298,7 @@ How the AI reads it back, in English:
 > فیلترشکن‌هاست که خودت عمداً آنجا گذاشته‌ای. فیلترشکن‌ها را یکی‌یکی و به ترتیب روشن کن تا وقتی که تلگرام
 > وصل شود؛ همین که تلگرام وصل شد، بس است. و بعد، در تلگرام Pepe را پیدا کن و بنویس: «wanna play CS:GO».
 > این مرحله تمام شد ولی کار نه. منتظر جواب Pepe بمان. اگر معنی جوابش «بله» بود، با هر عبارتی
-> («yes, I'm in»)، Counter-Strike را در Steam باز کن و بعد پخش زنده را در OBS شروع کن. اگر معنی‌اش «نه»
+> («yes, I'm in»)، Counter-Strike را در Steam باز کن و هم‌زمان پخش زنده را در OBS شروع کن. اگر معنی‌اش «نه»
 > بود، همه‌ی داخل آکولاد نادیده گرفته می‌شود. اسکریپت با یک نقطه و بدون ادامه تمام می‌شود. خداحافظ.
 
 **Naming rule for reading:** a file is read by what its name means, not spelled out. `first.script` is
