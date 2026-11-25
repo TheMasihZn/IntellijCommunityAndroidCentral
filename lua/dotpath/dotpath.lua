@@ -9,17 +9,40 @@ local M = {}
 
 ---------------------------------------------------------------- parser
 
--- Returns { verb = "start", segments = { {name=, args=, optional=, timeout=} | {brk=true} ... } }
+-- One statement:  [verb] path [-> name] [when path]
+-- Returns { verb=, segments={ {name=, args=, optional=, timeout=} | {brk=true} ... }, bind=, when= }
 function M.parse(src)
   local s = src:match("^%s*(.-)%s*$")
   local verb, rest = s:match("^(%a+)%s+(.*)$")
   if verb then s = rest else verb = "start" end
   if s:sub(1, 1) ~= "." then error("a path starts with '.': " .. s, 0) end
 
-  local segs, i, n = {}, 1, #s
+  local segs, i = M._path(s)
+  local cmd = { verb = verb, segments = segs }
+  while true do
+    i = s:match("^%s*()", i)
+    if i > #s then break end
+    local bind = s:match("^%->%s*([%a_][%w_]*)", i)
+    if bind then
+      cmd.bind = bind; i = s:match("^%->%s*[%a_][%w_]*()", i)
+    elseif s:match("^when%s+%.", i) then
+      local j = s:match("^when%s+()", i)
+      cmd.when, i = M._path(s, j)
+    else
+      error(("unexpected %q at column %d"):format(s:sub(i), i), 0)
+    end
+  end
+  return cmd
+end
+
+-- Parses a path starting at i; stops at whitespace. Returns segments, next index.
+function M._path(s, i)
+  local segs, n = {}, #s
+  i = i or 1
   while i <= n do
     local c = s:sub(i, i)
-    if c == "." then
+    if c:match("%s") then break
+    elseif c == "." then
       if s:sub(i + 1, i + 1) == "." and i + 1 < n then
         segs[#segs + 1] = { brk = true }   -- '..' : force a new step from the root
         i = i + 2
@@ -48,13 +71,42 @@ function M.parse(src)
         end
       end
       local nxt = s:sub(i, i)
-      if nxt ~= "" and nxt ~= "." then
+      if nxt ~= "" and nxt ~= "." and not nxt:match("%s") then
         error(("expected '.' after %s at column %d"):format(name, i), 0)
       end
       segs[#segs + 1] = seg
     end
   end
-  return { verb = verb, segments = segs }
+  return segs, i
+end
+
+-- Split a program into statements on ';' and newlines (outside quotes and parentheses).
+-- '#' starts a comment. Returns a list of statement strings.
+function M.split(text)
+  local out, buf, depth, quoted, i = {}, {}, 0, false, 1
+  local function flush()
+    local st = table.concat(buf):match("^%s*(.-)%s*$")
+    if st ~= "" then out[#out + 1] = st end
+    buf = {}
+  end
+  while i <= #text do
+    local c = text:sub(i, i)
+    if quoted then
+      buf[#buf + 1] = c
+      if c == "\\" then buf[#buf + 1] = text:sub(i + 1, i + 1); i = i + 1
+      elseif c == '"' then quoted = false end
+    elseif c == '"' then quoted = true; buf[#buf + 1] = c
+    elseif c == "(" then depth = depth + 1; buf[#buf + 1] = c
+    elseif c == ")" then depth = depth - 1; buf[#buf + 1] = c
+    elseif c == "#" and depth == 0 then
+      while i <= #text and text:sub(i, i) ~= "\n" do i = i + 1 end
+      flush()
+    elseif (c == ";" or c == "\n") and depth == 0 then flush()
+    else buf[#buf + 1] = c end
+    i = i + 1
+  end
+  flush()
+  return out
 end
 
 -- Arguments: "quoted strings" (with \" and \\), numbers, or bare words; comma separated.
@@ -251,7 +303,20 @@ function M._pipeline(root, segs, ctx, depth)
   if not okp then return false, { error = steps, steps = {} } end
   local report = { steps = {} }
   for _, step in ipairs(steps) do
-    local ok, value, note = exec(root, step.node, step.seg.args, ctx, step.label, step.seg.timeout, depth)
+    local args = step.seg.args
+    if args then
+      local a = {}
+      for k, v in ipairs(args) do
+        if type(v) == "string" and v:sub(1, 1) == "$" then
+          local key = v:sub(2)
+          if key == "it" then v = ctx.it else v = ctx.vars[key] end
+          if v == nil then return false, { error = step.label .. ": no value named " .. args[k], steps = report.steps } end
+        end
+        a[k] = v
+      end
+      args = a
+    end
+    local ok, value, note = exec(root, step.node, args, ctx, step.label, step.seg.timeout, depth)
     report.steps[#report.steps + 1] = { label = step.label, ok = ok, value = value, picked = note }
     ctx.log(("%s %s%s"):format(ok and "✓" or (step.seg.optional and "–" or "✗"), step.label,
       ok and (note and " → " .. note or "") or ": " .. tostring(value)))
@@ -265,26 +330,79 @@ function M._pipeline(root, segs, ctx, depth)
   return true, report
 end
 
--- Run a command line. opts: log=function(line), clock=function()->seconds, env=table
+local function explain(root, cmd, ctx)
+  local okx, steps = pcall(M.steps, root, cmd.segments)
+  if not okx then return false, steps end
+  for _, st in ipairs(steps) do
+    local kind = st.node.kind
+    local extra = kind == "group" and " try in order: " .. table.concat(st.node.order, ", ")
+      or kind == "alias" and " = " .. st.node.path or ""
+    ctx.log(("%s  [%s]%s%s"):format(st.label, kind, extra, st.seg.optional and "  (optional)" or ""))
+  end
+  return true, steps
+end
+
+-- Run a program: one or more statements separated by ';' or new lines.
+--   start   run now, automatically
+--   ask     run now, then the person approves the result before anything else happens
+--   later   run after every start/ask statement (the Android runtime picks the moment)
+--   explain show what would run, run nothing
+-- opts: log(line), clock() -> seconds, approve(statement, value) -> bool, notify(ok, report), env
 function M.run(root, src, opts)
   opts = opts or {}
-  local okp, cmd = pcall(M.parse, src)
-  if not okp then return false, { error = cmd, steps = {} } end
-  local ctx = { log = opts.log or print, clock = opts.clock or os.time, done = {}, env = opts.env or {} }
-  if cmd.verb == "explain" then
-    local okx, steps = pcall(M.steps, root, cmd.segments)
-    if not okx then return false, { error = steps, steps = {} } end
-    for _, st in ipairs(steps) do
-      local kind = st.node.kind
-      local extra = kind == "group" and " try in order: " .. table.concat(st.node.order, ", ")
-        or kind == "alias" and " = " .. st.node.path or ""
-      ctx.log(("%s  [%s]%s%s"):format(st.label, kind, extra, st.seg.optional and "  (optional)" or ""))
-    end
-    return true, { steps = steps }
-  elseif cmd.verb ~= "start" then
-    return false, { error = "unknown verb " .. cmd.verb, steps = {} }
+  local ctx = { log = opts.log or print, clock = opts.clock or os.time, done = {},
+                env = opts.env or {}, vars = {} }
+  local report = { steps = {}, skipped = {} }
+  local function finish(ok, err)
+    report.error = err
+    if opts.notify then opts.notify(ok, report) end
+    return ok, report
   end
-  return M._pipeline(root, cmd.segments, ctx, 0)
+
+  local cmds = {}
+  for _, text in ipairs(M.split(src)) do
+    local okp, cmd = pcall(M.parse, text)
+    if not okp then return finish(false, cmd) end
+    if not ({ start = 1, ask = 1, later = 1, explain = 1 })[cmd.verb] then
+      return finish(false, "unknown verb " .. cmd.verb)
+    end
+    cmd.text = text
+    cmds[#cmds + 1] = cmd
+  end
+
+  local queue = {}
+  for _, c in ipairs(cmds) do if c.verb ~= "later" then queue[#queue + 1] = c end end
+  for _, c in ipairs(cmds) do if c.verb == "later" then queue[#queue + 1] = c end end
+
+  for _, cmd in ipairs(queue) do
+    if cmd.verb == "explain" then
+      local ok, err = explain(root, cmd, ctx)
+      if not ok then return finish(false, err) end
+      for _, st in ipairs(err) do report.steps[#report.steps + 1] = st end
+    else
+      local go = true
+      if cmd.when then
+        local quiet = ctx.log; ctx.log = function() end
+        go = M._pipeline(root, cmd.when, ctx, 0)
+        ctx.log = quiet
+        if not go then
+          report.skipped[#report.skipped + 1] = cmd.text
+          ctx.log("– skipped (condition not met): " .. cmd.text)
+        end
+      end
+      if go then
+        local ok, sub = M._pipeline(root, cmd.segments, ctx, 0)
+        for _, st in ipairs(sub.steps) do report.steps[#report.steps + 1] = st end
+        if not ok then return finish(false, sub.error) end
+        if cmd.verb == "ask" then
+          local approve = opts.approve or function() return false end
+          if not approve(cmd.text, ctx.it) then return finish(false, "not approved: " .. cmd.text) end
+        end
+        if cmd.bind then ctx.vars[cmd.bind] = ctx.it end
+      end
+    end
+  end
+  return finish(true)
 end
 
 return M

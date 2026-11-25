@@ -115,5 +115,59 @@ test("load_dir reads folders", function()
   os.execute("rm -rf " .. d)
 end)
 
+local function parsa_tree(filtered)
+  calls = {}
+  local function rec(name, value) return { run = function(ctx, a)
+    calls[#calls + 1] = name .. "(" .. table.concat((function() local t = {}
+      for i, v in ipairs(a or {}) do t[i] = tostring(v) end return t end)(), ",") .. ")"
+    return true, value or name end } end
+  return dp.tree{
+    photos = { find = rec("find", "luna.jpg") },
+    telegram = { draft = rec("draft", "draft#7"), send = rec("send", "sent") },
+    net = { filtered = { run = function() return filtered end } },
+    [".vpn"] = { { "openvpn", rec("openvpn") } },
+  }
+end
+
+local PARSA = [[
+# "send Parsa the photo of Luna from last night, he'd like it"
+ask   .photos.find("Luna", last-night) -> photo;
+ask   .telegram.draft(Parsa, $photo, "فکر کنم اینو دوست داری") -> draft;
+later .vpn when .net.filtered;
+later .telegram.send($draft).
+]]
+
+test("program: ask first, later after, bindings, notify", function()
+  local asked, notified = {}, nil
+  local ok, r = dp.run(parsa_tree(true), PARSA, { log = function() end,
+    approve = function(text) asked[#asked + 1] = text; return true end,
+    notify = function(ok) notified = ok end })
+  assert(ok, r.error); eq(#asked, 2); eq(notified, true)
+  eq(calls[1], "find(Luna,last-night)")
+  eq(calls[2], "draft(Parsa,luna.jpg,فکر کنم اینو دوست داری)")
+  eq(calls[3], "openvpn()"); eq(calls[4], "send(draft#7)")
+end)
+
+test("program: condition false skips the VPN", function()
+  local ok, r = dp.run(parsa_tree(false), PARSA, { log = function() end, approve = function() return true end })
+  assert(ok, r.error); eq(#r.skipped, 1); eq(calls[3], "send(draft#7)")
+end)
+
+test("program: rejected ask stops before sending", function()
+  local ok, r = dp.run(parsa_tree(true), PARSA, { log = function() end,
+    approve = function(text) return not text:find("draft") end })
+  assert(not ok); assert(r.error:find("not approved")); eq(#calls, 2)
+end)
+
+test("split keeps ; inside strings and parens", function()
+  local st = dp.split('start .a("x;y");\nstart .b # c;d\n\nstart .c.')
+  eq(#st, 3); eq(st[1], 'start .a("x;y")'); eq(st[2], "start .b"); eq(st[3], "start .c.")
+end)
+
+test("unknown variable is an error", function()
+  local ok, r = dp.run(parsa_tree(true), "start .telegram.send($nope).", quiet)
+  assert(not ok); assert(r.error:find("nope"))
+end)
+
 print(("%d passed, %d failed"):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)
