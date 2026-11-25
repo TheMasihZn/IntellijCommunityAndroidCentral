@@ -169,5 +169,44 @@ test("unknown variable is an error", function()
   assert(not ok); assert(r.error:find("nope"))
 end)
 
+-- The first script file (first.script), compiled for one phone. See docs/terminal-language.md §7.
+local FIRST = [[
+start .vpn until .telegram.connected;
+start .telegram.write(Pepe, "wanna play CS:GO");
+start .telegram.wait-reply(Pepe)@30m -> respond;
+start .steam.counter-strike when $respond = yes;
+start .obs.stream when $respond = yes.
+]]
+
+local function first_tree(answer)
+  calls = {}
+  local connected = false
+  local function vpn(name, works) return { run = function()
+    calls[#calls + 1] = name; if works then connected = true end; return true end } end
+  local function rec(name, value) return { run = function(_, a)
+    calls[#calls + 1] = name .. (a and "(" .. table.concat(a, ",") .. ")" or ""); return true, value end } end
+  return dp.tree{
+    [".vpn"] = { { "free-a", vpn("free-a", false) }, { "free-b", vpn("free-b", true) }, { "paid", vpn("paid", true) } },
+    telegram = { connected = { run = function() return connected end },
+                 write = rec("write"), ["wait-reply"] = rec("wait-reply", answer) },
+    steam = { ["counter-strike"] = rec("cs") }, obs = { stream = rec("stream") },
+  }
+end
+
+test("first.script: try VPNs until Telegram connects, then play if yes", function()
+  local ok, r = dp.run(first_tree("Yes"), FIRST, quiet)
+  assert(ok, r.error)
+  eq(table.concat(calls, " "), "free-a free-b write(Pepe,wanna play CS:GO) wait-reply(Pepe) cs stream")
+end)
+
+test("first.script: answer no skips the game", function()
+  local ok, r = dp.run(first_tree("no"), FIRST, quiet)
+  assert(ok, r.error); eq(#r.skipped, 2); eq(calls[#calls], "wait-reply(Pepe)")
+end)
+
+test("when with != and quoted value", function()
+  local c = dp.parse('start .a when $x != "a b"'); eq(c.when.value, "a b"); assert(c.when.neg)
+end)
+
 print(("%d passed, %d failed"):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)

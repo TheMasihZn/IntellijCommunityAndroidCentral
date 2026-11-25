@@ -1,6 +1,6 @@
 # DotPath: the DevOs command language, and Intentions
 
-Status: draft 2 (2026-11-25). Reference interpreter: [`lua/dotpath/dotpath.lua`](../lua/dotpath/dotpath.lua),
+Status: draft 3 (2026-11-25). Reference interpreter: [`lua/dotpath/dotpath.lua`](../lua/dotpath/dotpath.lua),
 tests: `lua5.4 lua/dotpath/dotpath_test.lua`. Part of the Launcher plan (`docs/LAUNCHER-PLAN.md`, PR #2).
 
 ## خلاصه به فارسی
@@ -72,7 +72,8 @@ A leading `NN-` / `NN_` is not part of the name. What the person sees in the fil
 
 ```
 program   = statement { (";" | newline) statement } ["."]
-statement = [verb] path ["->" var] ["when" path]
+statement = [verb] path ["->" var] ["until" path] ["when" cond]
+cond      = path | "$" var ("=" | "!=") (bareword | '"' string '"')
 verb      = "start" | "ask" | "later" | "explain"      ; start is the default
 path      = "." segment { "." segment | ".." segment } ["."]
 segment   = name [ "(" [arg { "," arg }] ")" ] { "?" | "@" number ["s"|"m"] }
@@ -117,6 +118,10 @@ the segment is marked `?` (optional).
 | `explain` | prints the steps; runs nothing | reads it |
 
 `when <path>` runs the path as a silent test first; if it fails, the statement is skipped (not an error).
+`when $name = value` compares a stored result instead (case-insensitive, `!=` negates).
+`until <path>` changes what "success" means for a group: after each alternative runs, the path is tested,
+and only if it passes does the group stop (`start .vpn until .telegram.connected` keeps starting VPNs, in
+order, until Telegram reports connected).
 `-> name` stores the statement's result; `$name` uses it later. At the end the runtime notifies the person.
 
 ### 4.4 The procedure: attention first, automation later
@@ -202,7 +207,121 @@ DevOs/
   stream.path              -> .vpn.counterscreen.virtual.screen.
 ```
 
-## 7. Open questions
+## 7. Seed scripts: what the person writes
+
+There are two layers. The person writes (or says) a **seed script**; the AI decodes it for the machine it
+runs on, using the context file (§8), into a **DotPath program**, which runs deterministically. The seed is
+the source of truth; the compiled program is a per-machine cache that is rebuilt only when the seed or the
+context changes (never compute twice).
+
+The seed is written the way masih thinks, with programming habits where they help:
+
+| In a seed | Means | Read aloud |
+|---|---|---|
+| `vpn()` | start it | "start VPN" |
+| `.vpn` after a place (`HomeScreen.vpn`) | look it up there | "in the home screen, the VPN folder" |
+| `.forEach` | each alternative, in order | "for each one" |
+| `.while(X != Y)` / `until` | keep going until the goal holds | "while Telegram is not connected" |
+| `=>` | then | "then" |
+| `if(x=yes) { … }` | condition on an earlier result | "if the answer is yes" |
+| `;` | this step is done, the task continues | (pause) |
+| `.` at the end | the task is done | "done" |
+
+The seed does not have to be exact. Where the person was brief, lazy, or wrote a typo (`OBS.stream():`), the
+AI infers the intention from the context file and earlier scripts, and asks one short question only when two
+readings would do different things. A seed can also include an image or a voice note: a picture is worth a
+thousand words, so the AI reads context from whatever input method was used.
+
+### 7.1 Example: the first script file
+
+`first.script`, as masih wrote it:
+
+```
+HomeScreen
+.vpn
+.forEach
+.while(Telegram.connection != Connected)() =>Telegram.Pepe.write
+("wanna play CS:GO").
+if(respond=yes) {
+Steam.CounterStrike();
+OBS.stream():
+}.
+```
+
+Compiled for this phone (`first.dp`; this exact program is a test in `dotpath_test.lua`):
+
+```
+start .vpn until .telegram.connected;
+start .telegram.write(Pepe, "wanna play CS:GO");
+start .telegram.wait-reply(Pepe)@30m -> respond;
+start .steam.counter-strike when $respond = yes;
+start .obs.stream when $respond = yes.
+```
+
+How the AI reads it back, in English:
+
+> **The first script file** says: on the home screen, find `.vpn`. The context file tells me that is a folder
+> of VPN apps you put there on purpose and have used this way before. For each app in it, in order, start it,
+> and keep going while Telegram is not connected; the moment Telegram connects, stop trying. Then in Telegram,
+> write to Pepe: "wanna play CS:GO". That step is done, but the task is not. If Pepe answers yes, start
+> Counter-Strike in Steam, then start streaming in OBS. Done.
+
+و به فارسی:
+
+> **اسکریپت اول** می‌گوید: در صفحه‌ی اصلی، `.vpn` را پیدا کن. فایل زمینه می‌گوید این پوشه‌ای از
+> فیلترشکن‌هاست که خودت عمداً آنجا گذاشته‌ای. فیلترشکن‌ها را یکی‌یکی و به ترتیب روشن کن تا وقتی تلگرام
+> وصل نشده؛ همین که تلگرام وصل شد، بس است. بعد در تلگرام به Pepe بنویس: «wanna play CS:GO». این مرحله
+> تمام شد ولی کار نه. اگر Pepe جواب داد بله، Counter-Strike را در Steam باز کن و بعد پخش زنده را در OBS
+> شروع کن. تمام.
+
+**Naming rule for reading:** a file is read by what its name means, not spelled out. `first.script` is
+"the first script file" in English and «اسکریپت اول» in Persian; `vpn()` is "start VPN". Every character
+tells part of the story, so the AI narrates it rather than reading symbols.
+
+## 8. The context file
+
+Before any script, the AI is given the **context file** of the OS: what exists and how it was used. For
+example: the home screen has a folder `.vpn` holding these apps, in this order; Telegram has a contact
+Pepe; `.telegram.connected` is how to test the connection. It is updated by the result of every action,
+and apps can register **triggers** (like Android intents: an app declares what it reacts to, and is woken
+when that happens). The context file is what lets a seed say `.vpn` without saying what a VPN is.
+
+## 9. Folders as lazy filters
+
+A folder like `.vpn` on the home screen is a hand-made filter over a potentially infinite amount of
+information: instead of scanning and indexing every app on the device, the AI only looks at what the person
+put in the folder. The folder is re-read **only when a script runs it**, and the result is cached until the
+next run. Nothing is indexed in the background.
+
+## 10. A script is one file that expands into a tree
+
+On disk, a script is a single file of bytes. When it is given to the launcher, it is mounted as a virtual
+file tree: each statement is a node, each block (`{ … }`) a folder, and the context it carries is loaded
+with it. A memory file, a project, or a whole workflow can be one such file, and a file can live inside
+another. So information is kept together by meaning ("defragmented") without touching how the disk stores
+it. (Flash storage on phones does not need classic defragmentation anyway; the gain here is locality of
+*meaning*: everything a task needs is in one file, and only what the person intended is written.)
+
+## 11. Learning apps by demonstration
+
+To teach the system an app, the person does the task once while the screen is recorded. The AI turns the
+recording into an action (`telegram/write.lua`, or steps for the Android accessibility layer) and adds it to
+the tree. After that, seeds can name it.
+
+## 12. Naming the idea
+
+Suggested titles for a paper:
+
+1. *Intention-Compiled Computing: Natural Language as the Primary Input Method of an Operating System*
+2. *Seed Scripts: Human-Level Automation by Compiling Spoken Intentions into Deterministic Programs*
+3. *Understand Once, Run Forever: An LLM-Compiled Command Language over the User's Own File System*
+
+Possible name for the field: **Intention-oriented computing**. Related work to cite and compare against:
+programming by demonstration, Android intents, Tasker and Apple Shortcuts, LLM agents that operate apps
+(computer use). What is new here is the combination: the person's own folders as the vocabulary, the AI
+compiling once and then stepping out of execution, attention-first scheduling, and the readable seed.
+
+## 13. Open questions
 * Shadowing: when a child and a root entry share a name, the child wins and `..` forces the root. (Default; not confirmed.)
 * Parallel alternatives ("start all, keep the fastest"), e.g. a `.race` marker file in a group.
 * Undo for what a program started (`stop .vpn.`) via an optional `stop(ctx)` on actions.

@@ -9,7 +9,8 @@ local M = {}
 
 ---------------------------------------------------------------- parser
 
--- One statement:  [verb] path [-> name] [when path]
+-- One statement:  [verb] path [-> name] [until path] [when cond]
+--   cond = path | $name = value | $name != value
 -- Returns { verb=, segments={ {name=, args=, optional=, timeout=} | {brk=true} ... }, bind=, when= }
 function M.parse(src)
   local s = src:match("^%s*(.-)%s*$")
@@ -25,9 +26,26 @@ function M.parse(src)
     local bind = s:match("^%->%s*([%a_][%w_]*)", i)
     if bind then
       cmd.bind = bind; i = s:match("^%->%s*[%a_][%w_]*()", i)
+    elseif s:match("^until%s+%.", i) then
+      local j = s:match("^until%s+()", i)
+      cmd["until"], i = M._path(s, j)
     elseif s:match("^when%s+%.", i) then
       local j = s:match("^when%s+()", i)
       cmd.when, i = M._path(s, j)
+    elseif s:match("^when%s+%$", i) then
+      local var, op, j = s:match("^when%s+%$([%a_][%w_]*)%s*([!=]=?)%s*()", i)
+      if not var or (op ~= "=" and op ~= "!=" and op ~= "==") then error("bad condition at column " .. i, 0) end
+      local val
+      if s:sub(j, j) == '"' then
+        local q = s:match('^"(.-)"()', j)
+        if not q then error("unclosed string", 0) end
+        val, i = s:match('^"(.-)"()', j)
+      else
+        val = s:match("^[^%s]+", j) or ""; i = j + #val
+        val = val:gsub("%.$", "")                 -- the final '.' ends the program, not the value
+        val = tonumber(val) or val
+      end
+      cmd.when = { var = var, neg = op == "!=", value = val }
     else
       error(("unexpected %q at column %d"):format(s:sub(i), i), 0)
     end
@@ -284,6 +302,13 @@ local function exec(root, node, args, ctx, label, timeout, depth)
       local ok, value, note = exec(root, child, args, ctx, label .. "." .. name, timeout, depth + 1)
       ctx.log(("  %s %s.%s%s"):format(ok and "✓" or "✗", label, name,
         ok and (note and " (" .. note .. ")" or "") or ": " .. tostring(value)))
+      if ok and ctx["until"] then
+        local cond = ctx["until"]; ctx["until"] = nil
+        local quiet = ctx.log; ctx.log = function() end
+        local done = M._pipeline(root, cond, ctx, depth + 1)
+        ctx.log = quiet; ctx["until"] = cond
+        if not done then ok, value = false, "goal not reached yet" end
+      end
       if ok then return true, value, name end
       why[#why + 1] = name .. ": " .. tostring(value)
     end
@@ -381,17 +406,23 @@ function M.run(root, src, opts)
       for _, st in ipairs(err) do report.steps[#report.steps + 1] = st end
     else
       local go = true
-      if cmd.when then
+      if cmd.when and cmd.when.var then
+        local v = ctx.vars[cmd.when.var]
+        local same = v == cmd.when.value or tostring(v):lower() == tostring(cmd.when.value):lower()
+        go = same ~= cmd.when.neg
+      elseif cmd.when then
         local quiet = ctx.log; ctx.log = function() end
         go = M._pipeline(root, cmd.when, ctx, 0)
         ctx.log = quiet
-        if not go then
-          report.skipped[#report.skipped + 1] = cmd.text
-          ctx.log("– skipped (condition not met): " .. cmd.text)
-        end
+      end
+      if not go then
+        report.skipped[#report.skipped + 1] = cmd.text
+        ctx.log("– skipped (condition not met): " .. cmd.text)
       end
       if go then
+        ctx["until"] = cmd["until"]
         local ok, sub = M._pipeline(root, cmd.segments, ctx, 0)
+        ctx["until"] = nil
         for _, st in ipairs(sub.steps) do report.steps[#report.steps + 1] = st end
         if not ok then return finish(false, sub.error) end
         if cmd.verb == "ask" then
