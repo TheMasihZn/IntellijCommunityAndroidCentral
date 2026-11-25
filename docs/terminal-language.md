@@ -73,7 +73,7 @@ A leading `NN-` / `NN_` is not part of the name. What the person sees in the fil
 ```
 program   = statement { (";" | newline) statement } ["."]
 statement = [verb] path ["->" var] ["until" path] ["when" cond]
-cond      = path | "$" var ("=" | "!=") (bareword | '"' string '"')
+cond      = path | "$" var ("=" | "!=" | "means") (bareword | '"' string '"')
 verb      = "start" | "ask" | "later" | "explain"      ; start is the default
 path      = "." segment { "." segment | ".." segment } ["."]
 segment   = name [ "(" [arg { "," arg }] ")" ] { "?" | "@" number ["s"|"m"] }
@@ -119,6 +119,9 @@ the segment is marked `?` (optional).
 
 `when <path>` runs the path as a silent test first; if it fails, the statement is skipped (not an error).
 `when $name = value` compares a stored result instead (case-insensitive, `!=` negates).
+`when $name means yes` asks whether a free-form answer *means* yes ("Yes, I'm in!", «آره پایه‌ام»). This is
+the only place the LLM is used at run time, and only to classify one answer; without tokens or network a
+word-list fallback (`dp.means`) decides, and an unclear answer counts as not meeting the condition.
 `until <path>` changes what "success" means for a group: after each alternative runs, the path is tested,
 and only if it passes does the group stop (`start .vpn until .telegram.connected` keeps starting VPNs, in
 order, until Telegram reports connected).
@@ -221,11 +224,11 @@ The seed is written the way masih thinks, with programming habits where they hel
 | `vpn()` | start it | "start VPN" |
 | `.vpn` after a place (`HomeScreen.vpn`) | look it up there | "in the home screen, the VPN folder" |
 | `.forEach` | each alternative, in order | "for each one" |
-| `.while(X != Y)` / `until` | keep going until the goal holds | "while Telegram is not connected" |
-| `=>` | then | "then" |
-| `if(x=yes) { … }` | condition on an earlier result | "if the answer is yes" |
+| `.while(X != Y)` | keep going **until** the goal holds (masih writes *while* and means *until*) | "until Telegram is connected" |
+| `=>` | and then; the result feeds into the next action | "and then" |
+| `if(x=yes) { … }` | condition on an earlier result, judged by meaning; if it fails the whole `{ }` block is skipped | "if the answer means yes" |
 | `;` | this step is done, the task continues | (pause) |
-| `.` at the end | the task is done | "done" |
+| `.` at the end, nothing after | the script ends ("bye-bye") | "done" |
 
 The seed does not have to be exact. Where the person was brief, lazy, or wrote a typo (`OBS.stream():`), the
 AI infers the intention from the context file and earlier scripts, and asks one short question only when two
@@ -254,25 +257,28 @@ Compiled for this phone (`first.dp`; this exact program is a test in `dotpath_te
 start .vpn until .telegram.connected;
 start .telegram.write(Pepe, "wanna play CS:GO");
 start .telegram.wait-reply(Pepe)@30m -> respond;
-start .steam.counter-strike when $respond = yes;
-start .obs.stream when $respond = yes.
+start .steam.counter-strike when $respond means yes;
+start .obs.stream when $respond means yes.
 ```
 
 How the AI reads it back, in English:
 
 > **The first script file** says: on the home screen, find `.vpn`. The context file tells me that is a folder
 > of VPN apps you put there on purpose and have used this way before. For each app in it, in order, start it,
-> and keep going while Telegram is not connected; the moment Telegram connects, stop trying. Then in Telegram,
-> write to Pepe: "wanna play CS:GO". That step is done, but the task is not. If Pepe answers yes, start
-> Counter-Strike in Steam, then start streaming in OBS. Done.
+> until Telegram is connected; the moment Telegram connects, stop trying. And then, feeding into Telegram,
+> find Pepe and write: "wanna play CS:GO". That step is done, but the task is not. Wait for Pepe's reply. If
+> it means yes, in any words ("yes, I'm in"), start Counter-Strike in Steam, then start streaming in OBS. If
+> it means no (he is busy), everything inside the curly braces is skipped. The script ends with a dot and
+> nothing after it, so we are done. Bye-bye.
 
 و به فارسی:
 
 > **اسکریپت اول** می‌گوید: در صفحه‌ی اصلی، `.vpn` را پیدا کن. فایل زمینه می‌گوید این پوشه‌ای از
-> فیلترشکن‌هاست که خودت عمداً آنجا گذاشته‌ای. فیلترشکن‌ها را یکی‌یکی و به ترتیب روشن کن تا وقتی تلگرام
-> وصل نشده؛ همین که تلگرام وصل شد، بس است. بعد در تلگرام به Pepe بنویس: «wanna play CS:GO». این مرحله
-> تمام شد ولی کار نه. اگر Pepe جواب داد بله، Counter-Strike را در Steam باز کن و بعد پخش زنده را در OBS
-> شروع کن. تمام.
+> فیلترشکن‌هاست که خودت عمداً آنجا گذاشته‌ای. فیلترشکن‌ها را یکی‌یکی و به ترتیب روشن کن تا وقتی که تلگرام
+> وصل شود؛ همین که تلگرام وصل شد، بس است. و بعد، در تلگرام Pepe را پیدا کن و بنویس: «wanna play CS:GO».
+> این مرحله تمام شد ولی کار نه. منتظر جواب Pepe بمان. اگر معنی جوابش «بله» بود، با هر عبارتی
+> («yes, I'm in»)، Counter-Strike را در Steam باز کن و بعد پخش زنده را در OBS شروع کن. اگر معنی‌اش «نه»
+> بود، همه‌ی داخل آکولاد نادیده گرفته می‌شود. اسکریپت با یک نقطه و بدون ادامه تمام می‌شود. خداحافظ.
 
 **Naming rule for reading:** a file is read by what its name means, not spelled out. `first.script` is
 "the first script file" in English and «اسکریپت اول» in Persian; `vpn()` is "start VPN". Every character
