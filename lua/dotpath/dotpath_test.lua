@@ -269,5 +269,11 @@ test("configurable natije-giri symbol (Persian: <=) and Persian semicolon", func
   local t = dp.split("start .a؛ start .b.", fa); eq(#t, 2)
 end)
 
+test("missing name is traced to the removal log", function()
+  local ok, r = dp.run(fresh(), "start .obs.stream.", { log = function() end,
+    history = { obs = { when = "2026-11-24 22:10", by = "uninstaller (Play Store)", why = "app uninstalled" } } })
+  assert(not ok); assert(r.error:find("uninstaller"), r.error); assert(r.error:find("2026%-11%-24"))
+end)
+
 print(("%d passed, %d failed"):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)

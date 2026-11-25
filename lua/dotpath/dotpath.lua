@@ -345,7 +345,16 @@ end
 
 function M._pipeline(root, segs, ctx, depth)
   local okp, steps = pcall(M.steps, root, segs)
-  if not okp then return false, { error = steps, steps = {} } end
+  if not okp then
+    -- Everything is retraceable: if a name is missing, say who removed it, when and why.
+    local missing = tostring(steps):match("^unknown name %.(.+)$")
+    local h = missing and ctx.history and ctx.history[missing]
+    if h then
+      steps = ("%s (removed %s by %s%s)"):format(steps, h.when or "?", h.by or "?",
+        h.why and (": " .. h.why) or "")
+    end
+    return false, { error = steps, steps = {} }
+  end
   local report = { steps = {} }
   for _, step in ipairs(steps) do
     local args = step.seg.args
@@ -423,11 +432,13 @@ end
 -- (for a reply, a connection) calls ctx.wait() to let the others run. The Android runtime
 -- uses real threads/processes with the same dependency rules.
 -- opts: log(line), clock() -> seconds, approve(statement, value) -> bool, notify(ok, report),
---       means(value, target) -> bool, syntax (see M.syntax), env
+--       means(value, target) -> bool, syntax (see M.syntax), env,
+--       history = { [name] = {when=, by=, why=} }  the removal log, used to explain missing names
 function M.run(root, src, opts)
   opts = opts or {}
   local shared = { log = opts.log or print, clock = opts.clock or os.time, done = {},
-                   env = opts.env or {}, vars = {}, wait = coroutine.yield }
+                   env = opts.env or {}, vars = {}, wait = coroutine.yield,
+                   history = opts.history }
   local report = { steps = {}, skipped = {}, order = {} }
   local function finish(ok, err)
     report.error = err

@@ -332,8 +332,12 @@ one mind to another, natural or artificial. So it adapts to the **listener**, no
 
 * a five-year-old gets the idea in their own words, with something they have touched or seen;
 * a tailor gets real examples from tailoring that come from the same idea;
-* a physicist gets the formula, and a shared reference (a named model or equation they already know) instead
-  of a long explanation.
+* a physicist gets the formula, and an anecdote from established physics as shared context instead of a long
+  explanation. masih's own example: "I have a simpler way to describe geodesics, an alternative to the
+  mostly-plus convention: in the coordinates (−ct, x, y, z), replace the time component −ct with a related
+  physical quantity such as an entropy term (the time-related one in quantum mechanics, or the
+  information-theoretic one when talking about storage)." One sentence, because both sides already share the
+  reference.
 
 The listener's languages decide the words; every listener must understand 100% of it. The person's own way of
 marking a loaded concept by switching language (see the personal dictionary) may be kept, but never at the cost
@@ -346,7 +350,21 @@ information: instead of scanning and indexing every app on the device, the AI on
 put in the folder. The folder is re-read **only when a script runs it**, and the result is cached until the
 next run. Nothing is indexed in the background.
 
-## 10. A script is one file that expands into a tree
+## 10. Where things are: a basis, not a path
+
+The same idea applied to storage: instead of a single continuous path (`/sdcard/DevOs/.vpn/20-openvpn.sh`),
+every object's position is a function of a **basis**: a few independent coordinates that say where it
+belongs (for example: which co-launcher, which project or Intention, which kind of thing, which version).
+A reference names the coordinates, not the path, so moving or renaming a folder never breaks it; there are no
+soft links to go missing.
+
+Every change is logged with **where, when and by which authority**: masih, the autonomous AI acting for him, or
+an app (an uninstaller, an updater). Nothing disappears silently. When a script needs something that is
+gone, the error comes from that log: "`.obs` was removed on 2026-11-24 22:10 by the uninstaller (Play Store):
+app uninstalled". Everything is retraceable to its origin. The reference interpreter already does this for
+missing names (`opts.history`, tested).
+
+## 11. A script is one file that expands into a tree
 
 On disk, a script is a single file of bytes. When it is given to the launcher, it is mounted as a virtual
 file tree: each statement is a node, each block (`{ … }`) a folder, and the context it carries is loaded
@@ -355,13 +373,13 @@ another. So information is kept together by meaning ("defragmented") without tou
 it. (Flash storage on phones does not need classic defragmentation anyway; the gain here is locality of
 *meaning*: everything a task needs is in one file, and only what the person intended is written.)
 
-## 11. Learning apps by demonstration
+## 12. Learning apps by demonstration
 
 To teach the system an app, the person does the task once while the screen is recorded. The AI turns the
 recording into an action (`telegram/write.lua`, or steps for the Android accessibility layer) and adds it to
 the tree. After that, seeds can name it.
 
-## 12. Naming the idea
+## 13. Naming the idea
 
 Suggested titles for a paper:
 
@@ -374,7 +392,7 @@ programming by demonstration, Android intents, Tasker and Apple Shortcuts, LLM a
 (computer use). What is new here is the combination: the person's own folders as the vocabulary, the AI
 compiling once and then stepping out of execution, attention-first scheduling, and the readable seed.
 
-## 13. Open questions
+## 14. Open questions
 * Shadowing: when a child and a root entry share a name, the child wins and `..` forces the root. (Default; not confirmed.)
 * Parallel alternatives ("start all, keep the fastest"), e.g. a `.race` marker file in a group.
 * Undo for what a program started (`stop .vpn.`) via an optional `stop(ctx)` on actions.
