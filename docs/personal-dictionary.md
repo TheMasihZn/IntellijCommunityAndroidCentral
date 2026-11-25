@@ -17,4 +17,13 @@ speaks for him. Add a row whenever he coins or bends a word; never "correct" the
 | first.script | file name | read as "the first script file" / «اسکریپت اول», never spelled out | naming files by meaning |
 | seed script | — | what masih writes; the AI compiles it for each machine | `.script` files |
 | co-launcher | — | a separate Lua launcher instance running as its own user | Launcher plan |
+| استراکچر (structure) vs ساختار | English word written in Persian vs the Persian word | ساختار is the everyday word; استراکچر is the loaded technical concept under discussion | see "Switching language = emphasis" below |
 | فیلترشکن (filter-shekan) | Persian | VPN / anti-filter tool | `.vpn` |
+
+## Switching language = emphasis
+
+When masih switches language for one word (Alt+Shift on the keyboard, or in speech), he is making that word
+*heavier*: it names a specific concept in this discussion, not the everyday meaning. استراکچر is not just
+ساختار. Record each such pair here. The AI may use the same device when it speaks for him, but only as much as
+the listener can still follow every word: whoever is listening must understand 100% of what is said, in the
+languages they speak.

@@ -325,6 +325,20 @@ the words they coin or mix, like «تنظیمable» (Persian root, English suffi
 that acts for the person reads it before interpreting anything and uses the same words when it speaks for
 them, so it talks like them instead of like itself. New coinages are added as they appear.
 
+### 8.1 Speaking for the person
+
+When the AI explains something on the person's behalf, its goal is the shortest transfer of meaning from
+one mind to another, natural or artificial. So it adapts to the **listener**, not to the person who said it:
+
+* a five-year-old gets the idea in their own words, with something they have touched or seen;
+* a tailor gets real examples from tailoring that come from the same idea;
+* a physicist gets the formula, and a shared reference (a named model or equation they already know) instead
+  of a long explanation.
+
+The listener's languages decide the words; every listener must understand 100% of it. The person's own way of
+marking a loaded concept by switching language (see the personal dictionary) may be kept, but never at the cost
+of understanding.
+
 ## 9. Folders as lazy filters
 
 A folder like `.vpn` on the home screen is a hand-made filter over a potentially infinite amount of
