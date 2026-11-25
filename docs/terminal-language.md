@@ -29,6 +29,8 @@ later .telegram.send($draft).
 - **همه‌چیز به‌طور پیش‌فرض موازی است.** `;` یعنی «این را شروع کن و برو سراغ بعدی»، منتظر نمی‌ماند.
 - `=>` یعنی **نتیجه‌گیری**: اگر چیزی نتیجه‌ی چیز دیگری است، باید منتظرش ماند و خروجی‌اش ورودی بعدی می‌شود.
   (مثل «نتیجه می‌دهد» در ریاضی.) جز این، هیچ‌چیز منتظر هیچ‌چیز نمی‌ماند؛ بلوک‌های عمل هم با هم اجرا می‌شوند.
+- جهت فلش قابل تنظیم است: وقتی فارسی (راست به چپ) می‌نویسی یا حرف می‌زنی، می‌شود `<=` را به جای `=>`
+  گذاشت، و `؛` فارسی هم مثل `;` کار می‌کند.
 - `.` آخر یعنی «کار تمام شد».
 - `.vpn` یعنی برو داخل فولدر، فیلترشکن‌ها را به ترتیب امتحان کن، **اولین موفق** را نگه دار.
 - `ask` یعنی همین الان انجامش بده و نشانم بده تا تأیید کنم (مثل نوشتن پیش‌نویس و نزدن ارسال).
@@ -129,6 +131,11 @@ finished; then the person is notified. **Action blocks** (what a programmer woul
 in parallel with each other, unless a dependency is proven, judged by the AI when it compiles the seed (for
 example: Telegram needs the VPN first even if the person did not write `=>`), or the person asks for an order.
 The compiled program always writes such a judged dependency out as `=>`, so it can be read and corrected.
+
+**The symbols are configurable** per person and language. Someone speaking or writing Persian (right to
+left) may find `<=` the natural arrow for natije-giri, and the compiler may pick it from the person's
+language; the Persian semicolon `؛` works like `;`. These live in the syntax settings (`M.syntax` in the
+reference interpreter, `opts.syntax` per run), so the same program can be shown with either arrow.
 
 ### 4.4 Statements and verbs
 | Verb | When it runs | Person involved |

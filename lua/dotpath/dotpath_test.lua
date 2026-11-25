@@ -259,5 +259,15 @@ start .obs when $respond means yes.
   assert(ok, r.error); eq(table.concat(log, " "), "cs+ obs+ cs- obs-")
 end)
 
+test("configurable natije-giri symbol (Persian: <=) and Persian semicolon", function()
+  local log, got = {}, nil
+  local root = timeline_tree(log)
+  root.children.show = { kind = "action", run = function(ctx) got = ctx.it; return true end }
+  local fa = { ["then"] = { "<=" }, go_on = { ";", "؛" } }
+  local ok, r = dp.run(root, "start .slow <=\nstart .show؛ start .fast.", { log = function() end, syntax = fa })
+  assert(ok, r.error); eq(got, "slow")
+  local t = dp.split("start .a؛ start .b.", fa); eq(#t, 2)
+end)
+
 print(("%d passed, %d failed"):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)

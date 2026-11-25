@@ -107,7 +107,15 @@ end
 --   ;  or a new line   start this and go on to the next statement without waiting
 --   =>                 wait for this; its result feeds into the next statement as $it
 -- '#' starts a comment. Returns { {text=, sep=";"|"=>"} ... }.
-function M.split(text)
+-- The symbols are configurable per person/language (M.syntax, or opts.syntax in M.run): a Persian
+-- (right-to-left) writer may prefer "<=" for natije-giri, and the Persian semicolon "؛" works as ';'.
+M.syntax = { ["then"] = { "=>" }, go_on = { ";", "؛" } }
+
+function M.split(text, syntax)
+  syntax = syntax or M.syntax
+  local function at(i, list)
+    for _, op in ipairs(list) do if text:sub(i, i + #op - 1) == op then return op end end
+  end
   local out, buf, depth, quoted, i = {}, {}, 0, false, 1
   local function flush(sep)
     local st = table.concat(buf):match("^%s*(.-)%s*$")
@@ -127,8 +135,11 @@ function M.split(text)
     elseif c == "#" and depth == 0 then
       while i <= #text and text:sub(i, i) ~= "\n" do i = i + 1 end
       flush(";")
-    elseif c == "=" and text:sub(i + 1, i + 1) == ">" and depth == 0 then flush("=>"); i = i + 1
-    elseif (c == ";" or c == "\n") and depth == 0 then flush(";")
+    elseif depth == 0 and at(i, syntax["then"]) then
+      local op = at(i, syntax["then"]); flush("=>"); i = i + #op - 1
+    elseif depth == 0 and at(i, syntax.go_on) then
+      local op = at(i, syntax.go_on); flush(";"); i = i + #op - 1
+    elseif c == "\n" and depth == 0 then flush(";")
     else buf[#buf + 1] = c end
     i = i + 1
   end
@@ -412,7 +423,7 @@ end
 -- (for a reply, a connection) calls ctx.wait() to let the others run. The Android runtime
 -- uses real threads/processes with the same dependency rules.
 -- opts: log(line), clock() -> seconds, approve(statement, value) -> bool, notify(ok, report),
---       means(value, target) -> bool, env
+--       means(value, target) -> bool, syntax (see M.syntax), env
 function M.run(root, src, opts)
   opts = opts or {}
   local shared = { log = opts.log or print, clock = opts.clock or os.time, done = {},
@@ -425,7 +436,7 @@ function M.run(root, src, opts)
   end
 
   local cmds = {}
-  for _, st in ipairs(M.split(src)) do
+  for _, st in ipairs(M.split(src, opts.syntax)) do
     local okp, cmd = pcall(M.parse, st.text)
     if not okp then return finish(false, cmd) end
     if not ({ start = 1, ask = 1, later = 1, explain = 1 })[cmd.verb] then
