@@ -14,6 +14,13 @@ storage, and the archives can then be moved, kept on an SD card, or deleted.
 
 ## First install
 
+**App download (always the newest):**
+https://github.com/TheMasihZn/IntellijCommunityAndroidCentral/releases/download/latest/APKintellij.apk
+
+If an older APKintellij is installed and the new one says *App not installed*, uninstall the old
+one once: builds before the signing fix were each signed with a different temporary key. From now
+on every build uses the same key (`debug.keystore`, debug-only) and installs over the last one.
+
 1. Install the APK.
 2. Put the Linux image and the IntelliJ archive anywhere on the phone. Files named like the table
    above in **Download/** or an **APKintellij/** folder are found automatically (after you allow

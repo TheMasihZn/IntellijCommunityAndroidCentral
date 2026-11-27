@@ -11,7 +11,7 @@ android {
         applicationId = "dev.apkintellij"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "3").toInt() + 100
         versionName = "0.2.1"
         ndk {
             // proot and the Debian rootfs are arm64 only; every DeX-capable Samsung phone is arm64.
@@ -19,11 +19,24 @@ android {
         }
     }
 
+    // One fixed key, committed in the repo root. Before this, every CI run signed with a
+    // freshly generated key, so each new APK refused to install over the previous one.
+    signingConfigs {
+        create("fixed") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so the APK installs without extra setup.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("fixed")
+        }
+        debug {
+            signingConfig = signingConfigs.getByName("fixed")
         }
     }
 

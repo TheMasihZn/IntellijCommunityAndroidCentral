@@ -15,6 +15,7 @@ on:
       - 'gradle.properties'
       - 'scripts/fetch-proot.sh'
       - '.github/workflows/android-apk.yml'
+      - 'debug.keystore'
   pull_request:
     paths:
       - 'app/**'
@@ -77,3 +78,10 @@ jobs:
           gh release create "${{ steps.apk.outputs.tag }}" "${{ steps.apk.outputs.file }}" \
             --repo "${{ github.repository }}" --title "App ${{ steps.apk.outputs.tag }}" \
             --notes "Install this APK. It keeps your installed Linux image, IntelliJ and projects."
+          # Stable link that always points at the newest APK.
+          cp "${{ steps.apk.outputs.file }}" out/APKintellij.apk
+          git tag -f latest && git push -f origin latest
+          gh release view latest --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create latest --repo "${{ github.repository }}" --title "Latest app" \
+              --notes "Always the newest APK: https://github.com/${{ github.repository }}/releases/download/latest/APKintellij.apk"
+          gh release upload latest out/APKintellij.apk --clobber --repo "${{ github.repository }}"
